@@ -57,12 +57,12 @@ void process_key_schedule(const char *keystr, BYTE key[][4][4], int key_size, in
 void handle_file_input(const char *input_filename, BYTE bytearray[][4][4], int nb, int s);
 void write_output_file(const char *output_filename, BYTE outputarray[][4][4], int nb);
 void print_hex_output(BYTE outputarray[][4][4], int nb);
-void keyschedule128(BYTE key128[11][4][4]);
+void keyschedule128(BYTE key128[11][4][4], const char *keystr);
 void keyschedule192(BYTE key192[13][4][4], const char *keystr);
 void keyschedule256(BYTE key256[15][4][4], const char *keystr);
 void encrypt(int mc, int nb, int lk, BYTE key[][4][4], BYTE bytearray[][4][4], BYTE outputarray[][4][4], FILE *output);
 void decrypt(int mc, int nb, int lk, BYTE key[][4][4], BYTE bytearray[][4][4], BYTE outputarray[][4][4], FILE *output);
-
+BYTE galois_multiply(BYTE a, BYTE b);
 
 int main(int argc, char *argv[])
 {
@@ -110,7 +110,7 @@ if (argc != 3) {
     printf("Input file: ");
     scanf("%49s", input_filename);
 
-    FILE *file = fopen(input_filename, "r");
+    FILE *file = fopen(input_filename, "rb");
     if (!file) {
         perror("Error opening input file");
         return 5;
@@ -120,28 +120,35 @@ if (argc != 3) {
     fseek(file, 0, SEEK_END);
     int size = ftell(file);
     fseek(file, 0, SEEK_SET);
+    fclose(file);
 
     // need to separate it into 16B parts
     int s = size;
     while (size % 16 != 0) size++;
     int nb = size / 16;
 
-    BYTE bytearray[nb][4][4];
-    memset(bytearray, ' ', sizeof(bytearray));
+    BYTE (*bytearray)[4][4] = malloc(nb * sizeof(*bytearray));
+    BYTE (*outputarray)[4][4] = malloc(nb * sizeof(*outputarray));
+    if (!bytearray || !outputarray) {
+        perror("Memory allocation failed");
+        free(bytearray);
+        free(outputarray);
+        return 6;
+    }
+    memset(bytearray, 0x00, nb * sizeof(*bytearray));
+    memset(outputarray, 0x00, nb * sizeof(*outputarray));
 
     handle_file_input(input_filename, bytearray, nb, s);
-
-    BYTE outputarray[nb][4][4] = {0};
-
 
     char output_filename[50];
     printf("Output file: ");
     scanf("%49s", output_filename);
 
-    FILE *output = fopen(output_filename, "w");
+    FILE *output = fopen(output_filename, "wb");
     if (!output) {
         perror("Error opening output file");
-        return 6;
+        fclose(file);
+        return 7;
     }
 
     if (strcmp(argv[1], "encrypt") == 0) {
@@ -161,11 +168,14 @@ if (argc != 3) {
     }
 
     fclose(output);
+    free(bytearray);
+    free(outputarray);
+
     return 0;
 }
 
 
-void keyschedule128(BYTE key128[11][4][4]) {
+void keyschedule128(BYTE key128[11][4][4], const char *keystr) {
     for (int rd = 1; rd < 11; rd++) {
         BYTE RotWord[4];
         BYTE subword[4];
@@ -458,21 +468,22 @@ void process_key_schedule(const char *keystr, BYTE key[][4][4], int key_size, in
 }
 
 void handle_file_input(const char *input_filename, BYTE bytearray[][4][4], int nb, int s) {
-    FILE *file = fopen(input_filename, "r");
+    FILE *file = fopen(input_filename, "rb");
     if (!file) {
         perror("Error opening input file");
         exit(1);
     }
 
-    for (int x = 0; x < nb; x++) {
-        for (int i = 0; i < 4; i++) {
-            for (int j = 0; j < 4; j++) {
-                if (fscanf(file, "%c", &bytearray[x][i][j]) != 1 && (x * 16 + i * 4 + j < s)) {
-                    bytearray[x][i][j] = ' ';
-                }
-            }
-        }
+    size_t bytesRead = fread(bytearray, sizeof(BYTE), s, file);
+    if (bytesRead != s) {
+        fprintf(stderr, "Warning: Expected %d bytes, but only %zu bytes were read.\n", s, bytesRead);
     }
+
+    // Pad remaining bytes with spaces (if necessary)
+    if (bytesRead < s) {
+        memset((BYTE *)bytearray + bytesRead, 0x00, s - bytesRead);
+    }
+
     fclose(file);
 }
 

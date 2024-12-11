@@ -68,3 +68,6 @@ This flexibility provides a balance between security and performance, accommodat
 
 ### Conclusion
 The program’s design adheres to the structural rigor of AES while enabling customization for various performance and security trade-offs. Lookup tables expedite operations, and their modularity allows for flexible experimentation without compromising the core algorithmic structure.
+
+### Note
+We assume the keys are in ASCII chars.
