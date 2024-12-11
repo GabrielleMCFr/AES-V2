@@ -255,7 +255,7 @@ void keyschedule192(BYTE key192[13][4][4], const char *keystr) {
 }
 
 
-void keyschedule256(BYTE key256[15][4][4], char *keystr)
+void keyschedule256(BYTE key256[15][4][4], const char *keystr)
 {
     BYTE words[60][4] = {0};
 
