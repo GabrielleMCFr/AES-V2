@@ -55,13 +55,14 @@ BYTE RCON[11] = {0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x3
 // prototypes
 void process_key_schedule(const char *keystr, BYTE key[][4][4], int key_size, int mc);
 void handle_file_input(const char *input_filename, BYTE bytearray[][4][4], int nb, int s);
-void write_output_file(const char *output_filename, BYTE outputarray[][4][4], int nb);
+void write_output_file(const char *output_filename, BYTE *outputarray, int size);
 void print_hex_output(BYTE outputarray[][4][4], int nb);
 void keyschedule128(BYTE key128[11][4][4], const char *keystr);
 void keyschedule192(BYTE key192[13][4][4], const char *keystr);
 void keyschedule256(BYTE key256[15][4][4], const char *keystr);
 void encrypt(int mc, int nb, int lk, BYTE key[][4][4], BYTE bytearray[][4][4], BYTE outputarray[][4][4], FILE *output);
 void decrypt(int mc, int nb, int lk, BYTE key[][4][4], BYTE bytearray[][4][4], BYTE outputarray[][4][4], FILE *output);
+int remove_padding(BYTE *data, int size);
 BYTE galois_multiply(BYTE a, BYTE b);
 
 int main(int argc, char *argv[])
@@ -153,11 +154,17 @@ if (argc != 3) {
 
     if (strcmp(argv[1], "encrypt") == 0) {
         encrypt(mc, nb, lk, key, bytearray, outputarray, output);
+        write_output_file(output_filename, (BYTE *)outputarray, nb * 16);
     } else {
         decrypt(mc, nb, lk, key, bytearray, outputarray, output);
+
+        // remove PKCS#7 padding from the decrypted data
+        int decrypted_size = nb * 16;
+        decrypted_size = remove_padding((BYTE *)outputarray, decrypted_size);
+
+        write_output_file(output_filename, (BYTE *)outputarray, decrypted_size);
     }
 
-    write_output_file(output_filename, outputarray, nb);
 
     char answer;
     printf("Do you want to print the output in hex values? (y/n): ");
@@ -430,14 +437,14 @@ void decrypt(int mc, int nb, int lk, BYTE key[lk][4][4], BYTE bytearray[nb][4][4
     }
 }
 
-void write_output_file(const char *output_filename, BYTE outputarray[][4][4], int nb) {
+void write_output_file(const char *output_filename, BYTE *outputarray, int size) {
     FILE *output = fopen(output_filename, "wb");
     if (!output) {
         perror("Error opening output file");
         exit(1);
     }
 
-    fwrite(outputarray, sizeof(BYTE), nb * 16, output);
+    fwrite(outputarray, sizeof(BYTE), size, output);
     fclose(output);
 }
 
@@ -475,16 +482,40 @@ void handle_file_input(const char *input_filename, BYTE bytearray[][4][4], int n
     }
 
     size_t bytesRead = fread(bytearray, sizeof(BYTE), s, file);
-    if (bytesRead != s) {
+    if (bytesRead < s) {
         fprintf(stderr, "Warning: Expected %d bytes, but only %zu bytes were read.\n", s, bytesRead);
     }
 
-    // Pad remaining bytes with spaces (if necessary)
-    if (bytesRead < s) {
-        memset((BYTE *)bytearray + bytesRead, 0x00, s - bytesRead);
+    // add PKCS#7 padding
+    int padding_size = 16 - (bytesRead % 16); 
+    BYTE *data = (BYTE *)bytearray;           
+    for (size_t i = bytesRead; i < bytesRead + padding_size; i++) {
+        data[i] = (BYTE)padding_size; 
     }
 
     fclose(file);
+}
+
+int remove_padding(BYTE *data, int size) {
+    if (size == 0) return 0; 
+
+    BYTE padding_value = data[size - 1]; // last byte gives padding length
+
+    // check if padding_value is within valid range [1, 16]
+    if (padding_value < 1 || padding_value > 16) {
+        fprintf(stderr, "Invalid padding value: %d\n", padding_value);
+        return size; // Return original size (invalid padding)
+    }
+
+    // check all padding bytes have the same value
+    for (int i = size - padding_value; i < size; i++) {
+        if (data[i] != padding_value) {
+            fprintf(stderr, "Padding mismatch at byte %d: expected %02x, got %02x\n",
+                    i, padding_value, data[i]);
+            return size; // return original size (invalid padding)
+        }
+    }
+    return size - padding_value;
 }
 
 BYTE galois_multiply(BYTE a, BYTE b) {
